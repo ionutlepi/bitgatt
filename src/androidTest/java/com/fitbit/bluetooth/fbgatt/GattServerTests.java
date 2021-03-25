@@ -13,8 +13,9 @@ import com.fitbit.bluetooth.fbgatt.tx.AddGattServerServiceTransaction;
 import com.fitbit.bluetooth.fbgatt.tx.ReadGattServerCharacteristicDescriptorValueTransaction;
 import com.fitbit.bluetooth.fbgatt.tx.ReadGattServerCharacteristicValueTransaction;
 import com.fitbit.bluetooth.fbgatt.tx.mocks.MockNoOpTransaction;
+import com.fitbit.bluetooth.fbgatt.tx.mocks.MockServerNoOpTransaction;
 import com.fitbit.bluetooth.fbgatt.tx.mocks.NotifyGattServerCharacteristicMockTransaction;
-import com.fitbit.bluetooth.fbgatt.util.GattUtils;
+import com.fitbit.bluetooth.fbgatt.util.BluetoothUtils;
 import com.fitbit.bluetooth.fbgatt.util.NoOpGattCallback;
 
 import android.bluetooth.BluetoothAdapter;
@@ -210,7 +211,7 @@ public class GattServerTests {
             @Override
             public void onGattServerStarted(GattServerConnection serverConnection) {
                 super.onGattServerStarted(serverConnection);
-                MockNoOpTransaction firstBlockingTx = new MockNoOpTransaction(serverConnection, GattState.IDLE, 200);
+                MockServerNoOpTransaction firstBlockingTx = new MockServerNoOpTransaction(serverConnection, GattState.IDLE, 200);
                 serverConnection.setIntraTransactionDelay(200);
                 txStart[0] = System.currentTimeMillis();
                 serverConnection.runTx(firstBlockingTx, result -> {
@@ -235,7 +236,7 @@ public class GattServerTests {
     public void btOffOnWillClearServicesAndThatGattServerIfStartedWillRetunrAfterToggle() throws InterruptedException {
         // should do nothing if already started
         final CountDownLatch cdl = new CountDownLatch(2);
-        BluetoothAdapter adapter = new GattUtils().getBluetoothAdapter(mockContext);
+        BluetoothAdapter adapter = new BluetoothUtils().getBluetoothAdapter(mockContext);
         assertNotNull("adapter is null", adapter);
         AtomicBoolean isFirst = new AtomicBoolean(true);
         FitbitGatt.FitbitGattCallback cb = new NoOpGattCallback() {
@@ -277,7 +278,7 @@ public class GattServerTests {
     public void btOffOnWillClearServicesAndThatGattServerIsStillUsable() throws InterruptedException {
         // should do nothing if already started
         final CountDownLatch cdl = new CountDownLatch(2);
-        BluetoothAdapter adapter = new GattUtils().getBluetoothAdapter(mockContext);
+        BluetoothAdapter adapter = new BluetoothUtils().getBluetoothAdapter(mockContext);
         assertNotNull("adapter is null", adapter);
         AtomicBoolean isFirst = new AtomicBoolean(true);
         FitbitGatt.FitbitGattCallback cb = new NoOpGattCallback() {
@@ -326,7 +327,7 @@ public class GattServerTests {
     public void btOffOnWillClearServicesAndThatGattServerIfStartedWillRetunrAfterToggleMultipleTimesInQuickSuccession() throws InterruptedException {
         // should do nothing if already started
         final CountDownLatch cdl = new CountDownLatch(2);
-        BluetoothAdapter adapter = new GattUtils().getBluetoothAdapter(mockContext);
+        BluetoothAdapter adapter = new BluetoothUtils().getBluetoothAdapter(mockContext);
         assertNotNull("adapter is null", adapter);
         AtomicBoolean isFirst = new AtomicBoolean(true);
         AtomicInteger countTest = new AtomicInteger(1);

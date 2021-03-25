@@ -10,6 +10,8 @@
 
 package com.fitbit.bluetooth.fbgatt;
 
+import com.fitbit.bluetooth.fbgatt.util.BluetoothManagerProvider;
+import com.fitbit.bluetooth.fbgatt.util.BluetoothUtils;
 import com.fitbit.bluetooth.fbgatt.util.GattUtils;
 
 import android.app.PendingIntent;
@@ -27,12 +29,20 @@ import static com.fitbit.bluetooth.fbgatt.PeripheralScanner.BACKGROUND_SCAN_REQU
  */
 class BitGattDependencyProvider {
 
-    PeripheralScanner getNewPeripheralScanner(@NonNull Context context, @NonNull PeripheralScanner.TrackerScannerListener listener) {
-        return new PeripheralScanner(context, listener);
+    PeripheralScanner getNewPeripheralScanner(@NonNull PeripheralScanner.TrackerScannerListener listener, @NonNull FitbitGatt fbGatt) {
+        return new PeripheralScanner(listener, fbGatt);
     }
 
     GattUtils getNewGattUtils() {
         return new GattUtils();
+    }
+
+    BluetoothUtils getBluetoothUtils() {
+        return new BluetoothUtils();
+    }
+
+    BluetoothManagerProvider getBluetoothManagerProvider() {
+        return new BluetoothManagerProvider();
     }
 
     LowEnergyAclListener getNewLowEnergyAclListener() {

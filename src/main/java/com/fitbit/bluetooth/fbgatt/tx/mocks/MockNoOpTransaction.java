@@ -8,33 +8,26 @@
 
 package com.fitbit.bluetooth.fbgatt.tx.mocks;
 
+import com.fitbit.bluetooth.fbgatt.GattClientTransaction;
 import com.fitbit.bluetooth.fbgatt.GattConnection;
-import com.fitbit.bluetooth.fbgatt.GattServerConnection;
 import com.fitbit.bluetooth.fbgatt.GattState;
-import com.fitbit.bluetooth.fbgatt.GattTransaction;
 import com.fitbit.bluetooth.fbgatt.GattTransactionCallback;
 import com.fitbit.bluetooth.fbgatt.TransactionResult;
-
 import android.os.SystemClock;
-import androidx.annotation.Nullable;
-
 import org.jetbrains.annotations.TestOnly;
+import androidx.annotation.Nullable;
 
 /**
  * Simple transaction to use for testing
  */
 
 @TestOnly
-public class MockNoOpTransaction extends GattTransaction {
+public class MockNoOpTransaction extends GattClientTransaction {
     private static final String NAME = "MockNoOpTransaction";
     private long sometime;
+
     public MockNoOpTransaction(@Nullable GattConnection connection, GattState successEndState, long timeToWait) {
         super(connection, successEndState);
-        this.sometime = timeToWait;
-    }
-
-    public MockNoOpTransaction(GattServerConnection server, GattState successEndState, long timeToWait) {
-        super(server, successEndState);
         this.sometime = timeToWait;
     }
 

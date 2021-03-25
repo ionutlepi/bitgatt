@@ -19,7 +19,6 @@ import com.fitbit.bluetooth.fbgatt.logging.BitgattReleaseTree;
 import com.fitbit.bluetooth.fbgatt.strategies.BluetoothOffClearGattServerStrategy;
 import com.fitbit.bluetooth.fbgatt.strategies.Strategy;
 import com.fitbit.bluetooth.fbgatt.tx.AddGattServerServiceTransaction;
-import com.fitbit.bluetooth.fbgatt.tx.ClearServerServicesTransaction;
 import com.fitbit.bluetooth.fbgatt.tx.GattConnectTransaction;
 import com.fitbit.bluetooth.fbgatt.util.LooperWatchdog;
 
@@ -36,6 +35,7 @@ import android.bluetooth.BluetoothProfile;
 import android.bluetooth.le.ScanFilter;
 import android.bluetooth.le.ScanRecord;
 import android.bluetooth.le.ScanResult;
+import android.bluetooth.le.ScanSettings;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
@@ -43,8 +43,6 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.ParcelUuid;
-
-import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -103,8 +101,6 @@ public class FitbitGatt implements PeripheralScanner.TrackerScannerListener, Blu
     private BluetoothGattServer gattServer;
     // this is only used on init
     private final CopyOnWriteArrayList<BluetoothGattService> servicesToAdd = new CopyOnWriteArrayList<>();
-    private @NonNull
-    BatteryDataStatsAggregator powerAggregator;
     @Nullable
     private GattServerConnection serverConnection;
     private GattServerCallback serverCallback;
@@ -172,7 +168,6 @@ public class FitbitGatt implements PeripheralScanner.TrackerScannerListener, Blu
         ourInstance.overallGattEventListeners = new CopyOnWriteArrayList<>();
         // we will default to one expected device and that it should not looking
         ourInstance.alwaysConnectedScanner = new AlwaysConnectedScanner(1, false, Looper.getMainLooper());
-        ourInstance.powerAggregator = new BatteryDataStatsAggregator(null);
         ourInstance.fitbitGattAsyncOperationThread.start();
         ourInstance.fitbitGattAsyncOperationHandler = new Handler(ourInstance.fitbitGattAsyncOperationThread.getLooper());
         // we need to make sure that this thread is alive and responsive or our gatt
@@ -195,8 +190,7 @@ public class FitbitGatt implements PeripheralScanner.TrackerScannerListener, Blu
             Timber.w("Bitgatt must not be started yet, so as far as we know BT is off.");
             return false;
         }
-        BluetoothAdapter adapter = dependencyProvider.getNewGattUtils().getBluetoothAdapter(appContext);
-        if (adapter == null || !adapter.isEnabled()) {
+        if (!dependencyProvider.getBluetoothUtils().isBluetoothEnabled(appContext)) {
             if (isBluetoothOn) {
                 isBluetoothOn = false;
             }
@@ -206,18 +200,6 @@ public class FitbitGatt implements PeripheralScanner.TrackerScannerListener, Blu
             }
         }
         return isBluetoothOn;
-    }
-
-    @SuppressWarnings({"unused", "WeakerAccess"}) // internal API method
-    @NonNull
-    BatteryDataStatsAggregator getPowerAggregator() {
-        return powerAggregator;
-    }
-
-    @SuppressWarnings({"unused", "WeakerAccess"})
-        // internal API method
-    void setPowerAggregator(@NonNull BatteryDataStatsAggregator powerAggregator) {
-        this.powerAggregator = powerAggregator;
     }
 
     /**
@@ -367,10 +349,9 @@ public class FitbitGatt implements PeripheralScanner.TrackerScannerListener, Blu
 
     //Allows us to inject in FitbitGatt dependencies for testing
     @VisibleForTesting(otherwise = VisibleForTesting.NONE)
-    FitbitGatt(AlwaysConnectedScanner alwaysConnectedScanner, BatteryDataStatsAggregator aggregator, Handler fitbitGattAsyncOperationHandler, Handler connectionCleanup, LooperWatchdog watchDog) {
+    FitbitGatt(AlwaysConnectedScanner alwaysConnectedScanner, Handler fitbitGattAsyncOperationHandler, Handler connectionCleanup, LooperWatchdog watchDog) {
         this.overallGattEventListeners = new CopyOnWriteArrayList<>();
         this.alwaysConnectedScanner = alwaysConnectedScanner;
-        this.powerAggregator = aggregator;
         this.fitbitGattAsyncOperationHandler = fitbitGattAsyncOperationHandler;
         this.connectionCleanup = connectionCleanup;
         this.asyncOperationThreadWatchdog = watchDog;
@@ -813,6 +794,34 @@ public class FitbitGatt implements PeripheralScanner.TrackerScannerListener, Blu
         }
     }
 
+    synchronized void addConnectedDevice(BluetoothDevice device) {
+        fitbitGattAsyncOperationHandler.post(() -> {
+            FitbitBluetoothDevice fitbitBluetoothDevice = new FitbitBluetoothDevice(device);
+            fitbitBluetoothDevice.origin = FitbitBluetoothDevice.DeviceOrigin.CONNECTED;
+            addConnectedDeviceToConnectionMap(this.appContext, fitbitBluetoothDevice);
+        });
+    }
+
+    @VisibleForTesting
+    void addConnectedDeviceToConnectionMap(Context context, FitbitBluetoothDevice device) {
+        Timber.v("Adding the new connected device");
+        BluetoothAdapter adapter = dependencyProvider.getBluetoothUtils().getBluetoothAdapter(context);
+        if (adapter != null) {
+            if (null == connectionMap.get(device)) {
+                Timber.v("Adding connected device named %s, with address %s", device.getName(), device.getAddress());
+                if (context != null) {
+                    GattConnection conn = new GattConnection(device, context.getMainLooper());
+                    conn.setState(GattState.CONNECTED);
+                    connectionMap.put(device, conn);
+                    FitbitGatt.getInstance().notifyListenersOfConnectionAdded(conn);
+                } else {
+                    Timber.w("Tried to add the connected device, but the cached context was null");
+                }
+            }
+        }
+        Timber.v("Added the new connected device");
+    }
+
     /**
      * Starts the gatt server and allows the execution of {@link GattTransaction} on it
      *
@@ -864,6 +873,15 @@ public class FitbitGatt implements PeripheralScanner.TrackerScannerListener, Blu
         startServer(getOpenGattServerCallback(services));
     }
 
+
+    public void setScanSettings(ScanSettings scanSettings) {
+        if(this.peripheralScanner != null) {
+            this.peripheralScanner.setScanSettings(scanSettings);
+        } else {
+          Timber.w("Scanner was not initialized so we are not updating settings");
+        }
+    }
+
     @NonNull
     @VisibleForTesting
     OpenGattServerCallback getOpenGattServerCallback(@Nullable List<BluetoothGattService> services) {
@@ -894,9 +912,7 @@ public class FitbitGatt implements PeripheralScanner.TrackerScannerListener, Blu
         if (!isInitialized.get()) {
             Timber.v("Starting fitbit gatt");
             appContext = context.getApplicationContext();
-
-            powerAggregator = new BatteryDataStatsAggregator(this.appContext);
-            peripheralScanner = dependencyProvider.getNewPeripheralScanner(this.appContext, this);
+            peripheralScanner = dependencyProvider.getNewPeripheralScanner(this, this);
             connectionCleanup = new Handler(context.getMainLooper());
 
             Timber.v("Initializing the always connected scanner for one device, and that it should stop scanning when it finds one, if you wish to change this, please configure it.");
@@ -1072,7 +1088,6 @@ public class FitbitGatt implements PeripheralScanner.TrackerScannerListener, Blu
         return this.serverCallback;
     }
 
-    @SuppressWarnings("WeakerAccess") // API Method
     @Nullable
     public GattClientCallback getClientCallback() {
         return this.clientCallback;
@@ -1294,15 +1309,19 @@ public class FitbitGatt implements PeripheralScanner.TrackerScannerListener, Blu
                     for (BluetoothDevice connectedDevice : connectedDevices) {
                         FitbitBluetoothDevice fitbitBluetoothDevice = new FitbitBluetoothDevice(connectedDevice);
                         fitbitBluetoothDevice.origin = FitbitBluetoothDevice.DeviceOrigin.CONNECTED;
-                        if (null == connectionMap.get(fitbitBluetoothDevice)) {
+                        GattConnection connection = connectionMap.get(fitbitBluetoothDevice);
+                        if (null == connection) {
                             Timber.v("Adding connected device named %s, with address %s", connectedDevice.getName(), connectedDevice.getAddress());
                             if (appContext != null) {
                                 GattConnection conn = new GattConnection(fitbitBluetoothDevice, appContext.getMainLooper());
+                                conn.setState(GattState.CONNECTED);
                                 connectionMap.put(fitbitBluetoothDevice, conn);
                                 FitbitGatt.getInstance().notifyListenersOfConnectionAdded(conn);
                             } else {
                                 Timber.w("Tried to add a discovered device, but the cached context was null");
                             }
+                        } else {
+                            connection.setState(GattState.CONNECTED);
                         }
                     }
                 }
@@ -1422,7 +1441,7 @@ public class FitbitGatt implements PeripheralScanner.TrackerScannerListener, Blu
      * @param callback The async callback for resolving the gatt server open
      */
     private synchronized void startServer(OpenGattServerCallback callback) {
-        BluetoothManager manager = dependencyProvider.getNewGattUtils().getBluetoothManager(this.appContext);
+        BluetoothManager manager = dependencyProvider.getBluetoothManagerProvider().get(this.appContext);
         if (manager != null && manager.getAdapter() != null) {
             /*
              * We've observed that the registration of the callback inside of the android
@@ -1455,21 +1474,21 @@ public class FitbitGatt implements PeripheralScanner.TrackerScannerListener, Blu
                 for (int openServerRetryCount = 0; openServerRetryCount < OPEN_GATT_SERVER_RETRY_COUNT; openServerRetryCount++) {
                     gattServer = manager.openGattServer(context, serverCallback);
                     if (gattServer != null) {
-                        if (serverConnection != null) {
-                            // let's try to run a clear tx since we already have a server connection
-                            ClearServerServicesTransaction clearServices = new ClearServerServicesTransaction(serverConnection,
-                                    GattState.CLEAR_GATT_SERVER_SERVICES_SUCCESS);
-                            serverConnection.runTx(clearServices, getGattClearServicesTransactionCallback(context, callback));
-                            return;
-                        } else {
+                        if(gattServer.getServices().size() != 0) {
+                            Timber.w("We have services on a fresh gatt server instance");
                             gattServer.clearServices();
-                            setGattServerConnection(new GattServerConnection(gattServer, context.getMainLooper()));
-                            serverConnection.setState(GattState.IDLE);
-                            callback.onGattServerStatus(true);
-                            isGattServerStarting.set(false);
-                            Timber.tag("FitbitGattServer").v("Gatt server successfully opened");
-                            return;
                         }
+                        if (serverConnection != null) {
+                            // We have a new server instance we need to replace it in the GattServerConnection
+                            serverConnection.close();
+                            serverConnection.setState(GattState.IDLE);
+                        }
+                        setGattServerConnection(new GattServerConnection(gattServer, context.getMainLooper()));
+                        serverConnection.setState(GattState.IDLE);
+                        callback.onGattServerStatus(true);
+                        isGattServerStarting.set(false);
+                        Timber.tag("FitbitGattServer").v("Gatt server successfully opened");
+                        return;
                     }
                 }
                 isGattServerStarting.set(false);
@@ -1479,17 +1498,6 @@ public class FitbitGatt implements PeripheralScanner.TrackerScannerListener, Blu
         };
     }
 
-    @NonNull
-    private GattTransactionCallback getGattClearServicesTransactionCallback(Context context, OpenGattServerCallback callback) {
-        return result -> {
-            // whether this succeeds or not, we want to proceed
-            Timber.v("The gatt server services were cleared %s", result.resultStatus);
-            setGattServerConnection(new GattServerConnection(gattServer, context.getMainLooper()));
-            serverConnection.setState(GattState.IDLE);
-            callback.onGattServerStatus(true);
-            isGattServerStarting.set(false);
-        };
-    }
 
     /**
      * Will add a device that was discovered via the background scan in a provided scan result to
@@ -1797,7 +1805,7 @@ public class FitbitGatt implements PeripheralScanner.TrackerScannerListener, Blu
 
     }
 
-    @NotNull
+    @NonNull
     private List<GattServerTransaction> getGattAddServerServiceTransactions(List<BluetoothGattService> services) {
         List<GattServerTransaction> transactions = new ArrayList<>();
         for (BluetoothGattService service : services) {
@@ -1806,7 +1814,7 @@ public class FitbitGatt implements PeripheralScanner.TrackerScannerListener, Blu
         return transactions;
     }
 
-    @NotNull
+    @NonNull
     private GattTransactionCallback getGattAddServicesOnTransactionCallback() {
         return result -> {
             Timber.d("Gatt server init add service result: %s", result);
@@ -1953,7 +1961,8 @@ public class FitbitGatt implements PeripheralScanner.TrackerScannerListener, Blu
     /**
      * @return true if log statements that may slow down data transfer speeds should be executed
      */
-    boolean isSlowLoggingEnabled() {
+    @RestrictTo(RestrictTo.Scope.LIBRARY)
+    public boolean isSlowLoggingEnabled() {
         return slowLoggingEnabled;
     }
 

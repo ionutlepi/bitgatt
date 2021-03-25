@@ -11,7 +11,8 @@ package com.fitbit.bluetooth.fbgatt;
 import com.fitbit.bluetooth.fbgatt.exception.BluetoothNotEnabledException;
 import com.fitbit.bluetooth.fbgatt.exception.MissingGattServerErrorException;
 import com.fitbit.bluetooth.fbgatt.tx.ClearServerServicesTransaction;
-import com.fitbit.bluetooth.fbgatt.util.GattUtils;
+import com.fitbit.bluetooth.fbgatt.util.BluetoothManagerProvider;
+import com.fitbit.bluetooth.fbgatt.util.BluetoothUtils;
 import com.fitbit.bluetooth.fbgatt.util.LooperWatchdog;
 
 import android.app.PendingIntent;
@@ -20,6 +21,7 @@ import android.bluetooth.BluetoothGattServer;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.le.ScanFilter;
+import android.bluetooth.le.ScanSettings;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Handler;
@@ -35,8 +37,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
@@ -47,6 +48,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.verifyZeroInteractions;
+import static org.mockito.Mockito.when;
 
 /**
  * Responsible for testing the {@link FitbitGatt} api
@@ -58,11 +60,11 @@ public class FitbitGattTest {
     private BluetoothManager managerMock = mock(BluetoothManager.class);
     private BluetoothAdapter adapterMock = mock(BluetoothAdapter.class);
     private Handler fitbitGattAsyncOperationHandlerMock = mock(Handler.class);
-    private BatteryDataStatsAggregator batteryDataStatsAggregatorMock = mock(BatteryDataStatsAggregator.class);
     private AlwaysConnectedScanner alwaysConnectedScannerMock = mock(AlwaysConnectedScanner.class);
     private Looper looperMock = mock(Looper.class);
     private Context contextMock = mock(Context.class);
-    private GattUtils utilsMock = mock(GattUtils.class);
+    private BluetoothUtils utilsMock = mock(BluetoothUtils.class);
+    private BluetoothManagerProvider mockBluetoothManagerProvider = mock(BluetoothManagerProvider.class);
     private Handler connectionCleanUpHandler = mock(Handler.class);
     private LowEnergyAclListener lowEnergyAclListenerMock = mock(LowEnergyAclListener.class);
     private PeripheralScanner scannerMock = mock(PeripheralScanner.class);
@@ -70,7 +72,6 @@ public class FitbitGattTest {
     private PendingIntent scanIntentMock = mock(PendingIntent.class);
     private FitbitGatt fitbitGatt = new FitbitGatt(
         alwaysConnectedScannerMock,
-        batteryDataStatsAggregatorMock,
         fitbitGattAsyncOperationHandlerMock,
         connectionCleanUpHandler,
         mock(LooperWatchdog.class));
@@ -80,15 +81,15 @@ public class FitbitGattTest {
         doReturn(contextMock).when(contextMock).getApplicationContext();
         doReturn(looperMock).when(contextMock).getMainLooper();
         doReturn(adapterMock).when(utilsMock).getBluetoothAdapter(contextMock);
-        doReturn(true).when(adapterMock).isEnabled();
+        doReturn(true).when(utilsMock).isBluetoothEnabled(contextMock);
         doReturn(adapterMock).when(managerMock).getAdapter();
-        doReturn(managerMock).when(contextMock).getSystemService(Context.BLUETOOTH_SERVICE);
-        doReturn(managerMock).when(utilsMock).getBluetoothManager(contextMock);
 
 
         doReturn(scanIntentMock).when(dependencyProviderMock).getNewScanPendingIntent(eq(contextMock), any());
         doReturn(bluetoothRadioStatusListenerMock).when(dependencyProviderMock).getNewBluetoothRadioStatusListener(contextMock, false);
-        doReturn(utilsMock).when(dependencyProviderMock).getNewGattUtils();
+        doReturn(utilsMock).when(dependencyProviderMock).getBluetoothUtils();
+        doReturn(mockBluetoothManagerProvider).when(dependencyProviderMock).getBluetoothManagerProvider();
+        doReturn(managerMock).when(mockBluetoothManagerProvider).get(contextMock);
         doReturn(lowEnergyAclListenerMock).when(dependencyProviderMock).getNewLowEnergyAclListener();
         fitbitGatt.setDependencyProvider(dependencyProviderMock);
         FitbitGatt.setInstance(fitbitGatt);
@@ -99,6 +100,17 @@ public class FitbitGattTest {
         FitbitGatt.getInstance().shutdown();
         FitbitGatt.setInstance(null);
     }
+
+    @Test
+    public void testSetScanSettings() {
+        ScanSettings mock = mock(ScanSettings.class);
+        fitbitGatt.setPeripheralScanner(scannerMock);
+
+        fitbitGatt.setScanSettings(mock);
+
+        verify(scannerMock).setScanSettings(mock);
+    }
+
 
     @Test
     public void testGattStartWithBluetoothOn() {
@@ -117,7 +129,7 @@ public class FitbitGattTest {
 
     @Test
     public void testGattClientStartWithBluetoothOff() {
-        doReturn(false).when(adapterMock).isEnabled();
+        doReturn(false).when(utilsMock).isBluetoothEnabled(contextMock);
 
         FitbitGatt.FitbitGattCallback cb = mock(FitbitGatt.FitbitGattCallback.class);
         fitbitGatt.registerGattEventListener(cb);
@@ -132,8 +144,6 @@ public class FitbitGattTest {
 
     @Test
     public void startGattServerWithBitgattStarted() {
-        doReturn(true).when(adapterMock).isEnabled();
-
         FitbitGatt.FitbitGattCallback cb = mock(FitbitGatt.FitbitGattCallback.class);
         fitbitGatt.registerGattEventListener(cb);
         fitbitGatt.setStarted(true);
@@ -148,7 +158,7 @@ public class FitbitGattTest {
 
     @Test
     public void startGattServerWithMissingBluetoothManager() {
-        doReturn(null).when(utilsMock).getBluetoothManager(contextMock);
+        doReturn(null).when(mockBluetoothManagerProvider).get(contextMock);
 
         FitbitGatt.FitbitGattCallback cb = mock(FitbitGatt.FitbitGattCallback.class);
         fitbitGatt.registerGattEventListener(cb);
@@ -207,6 +217,28 @@ public class FitbitGattTest {
         startGattServer.run();
 
         verify(cb, times(1)).onGattServerStarted(any());
+        verify(serverMock, never()).clearServices();
+        verify(openServerCB, times(1)).onGattServerStatus(true);
+        verifyNoMoreInteractions(cb);
+        verifyNoMoreInteractions(openServerCB);
+        assertSame(GattState.IDLE, fitbitGatt.getServer().getGattState());
+    }
+
+    @Test
+    public void startingTheGattServerWithCachedServices() {
+        BluetoothGattServer serverMock = mock(BluetoothGattServer.class);
+        ArrayList<BluetoothGattService> services = new ArrayList<BluetoothGattService>();
+        services.add(mock(BluetoothGattService.class));
+        doReturn(services).when(serverMock).getServices();
+        doReturn(serverMock).when(managerMock).openGattServer(eq(contextMock), any());
+        FitbitGatt.OpenGattServerCallback openServerCB = mock(FitbitGatt.OpenGattServerCallback.class);
+        FitbitGatt.FitbitGattCallback cb = mock(FitbitGatt.FitbitGattCallback.class);
+
+        fitbitGatt.registerGattEventListener(cb);
+        Runnable startGattServer = fitbitGatt.tryAndStartGattServer(contextMock, openServerCB, managerMock);
+        startGattServer.run();
+
+        verify(cb, times(1)).onGattServerStarted(any());
         verify(serverMock).clearServices();
         verify(openServerCB, times(1)).onGattServerStatus(true);
         verifyNoMoreInteractions(cb);
@@ -239,13 +271,15 @@ public class FitbitGattTest {
         FitbitGatt.OpenGattServerCallback openServerCB = mock(FitbitGatt.OpenGattServerCallback.class);
         FitbitGatt.FitbitGattCallback cb = mock(FitbitGatt.FitbitGattCallback.class);
         GattServerConnection prevConnection = mock(GattServerConnection.class);
+        GattServerConnection newConnection = mock(GattServerConnection.class);
+        when(newConnection.getGattState()).thenReturn(GattState.IDLE);
         doAnswer(invocation -> {
             TransactionResult tr = new TransactionResult.Builder()
                 .resultStatus(TransactionResult.TransactionResultStatus.SUCCESS).build();
             GattTransactionCallback gattServerCallback = invocation.getArgument(1);
             gattServerCallback.onTransactionComplete(tr);
             return tr;
-        }).when(prevConnection).runTx(any(ClearServerServicesTransaction.class), any());
+        }).when(newConnection).runTx(any(ClearServerServicesTransaction.class), any());
 
         fitbitGatt.setGattServerConnection(prevConnection);
         fitbitGatt.setAppContext(contextMock);
@@ -254,11 +288,12 @@ public class FitbitGattTest {
         Runnable startGattServer = fitbitGatt.tryAndStartGattServer(contextMock, openServerCB, managerMock);
         startGattServer.run();
 
-        verify(prevConnection).runTx(any(ClearServerServicesTransaction.class), any());
+        verify(prevConnection).close();
         verify(cb, times(1)).onGattServerStarted(any());
         verify(openServerCB, times(1)).onGattServerStatus(true);
         verifyNoMoreInteractions(cb);
         verifyNoMoreInteractions(openServerCB);
+        assertNotSame(prevConnection, fitbitGatt.getServer());
         assertSame(GattState.IDLE, fitbitGatt.getServer().getGattState());
     }
 
@@ -367,6 +402,61 @@ public class FitbitGattTest {
         fitbitGatt.doDecrementAndInvalidateClosedConnections();
 
         verifyNoMoreInteractions(cb);
+    }
+
+    @Test
+    public void testAddingNewConnectedDevice() {
+        ConcurrentHashMap<FitbitBluetoothDevice, GattConnection> map = new ConcurrentHashMap<FitbitBluetoothDevice, GattConnection>();
+        FitbitBluetoothDevice fbDevice = mock(FitbitBluetoothDevice.class);
+
+        FitbitGatt.FitbitGattCallback cb = mock(FitbitGatt.FitbitGattCallback.class);
+        fitbitGatt.registerGattEventListener(cb);
+        fitbitGatt.setAppContext(contextMock);
+        fitbitGatt.setStarted(true);
+        fitbitGatt.setGattClientStarted(true);
+        fitbitGatt.setConnectionMap(map);
+
+        fitbitGatt.addConnectedDeviceToConnectionMap(contextMock, fbDevice);
+
+        verify(cb, times(1)).onBluetoothPeripheralDiscovered(any());
+        verifyNoMoreInteractions(cb);
+    }
+
+    @Test
+    public void failToAddExistingConnectedDevice() {
+        ConcurrentHashMap<FitbitBluetoothDevice, GattConnection> map = new ConcurrentHashMap<FitbitBluetoothDevice, GattConnection>();
+        FitbitBluetoothDevice fbDevice = mock(FitbitBluetoothDevice.class);
+        GattConnection connection = mock(GattConnection.class);
+        map.put(fbDevice, connection);
+
+        FitbitGatt.FitbitGattCallback cb = mock(FitbitGatt.FitbitGattCallback.class);
+        fitbitGatt.registerGattEventListener(cb);
+        fitbitGatt.setAppContext(contextMock);
+        fitbitGatt.setStarted(true);
+        fitbitGatt.setGattClientStarted(true);
+        fitbitGatt.setConnectionMap(map);
+
+        fitbitGatt.addConnectedDeviceToConnectionMap(contextMock, fbDevice);
+
+        verifyZeroInteractions(cb);
+    }
+
+    @Test
+    public void failToAddConnectedDeviceIfAdapterIsNull() {
+        ConcurrentHashMap<FitbitBluetoothDevice, GattConnection> map = new ConcurrentHashMap<FitbitBluetoothDevice, GattConnection>();
+        FitbitBluetoothDevice fbDevice = mock(FitbitBluetoothDevice.class);
+        doReturn(null).when(utilsMock).getBluetoothAdapter(contextMock);
+
+        FitbitGatt.FitbitGattCallback cb = mock(FitbitGatt.FitbitGattCallback.class);
+        fitbitGatt.registerGattEventListener(cb);
+        fitbitGatt.setAppContext(contextMock);
+        fitbitGatt.setStarted(true);
+        fitbitGatt.setGattClientStarted(true);
+        fitbitGatt.setConnectionMap(map);
+
+        fitbitGatt.addConnectedDeviceToConnectionMap(contextMock, fbDevice);
+
+        verifyZeroInteractions(cb);
     }
 
     @Test

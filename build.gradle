@@ -5,7 +5,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
-
+import groovy.io.FileType
 buildscript {
     repositories {
         google()
@@ -21,10 +21,26 @@ apply plugin: 'com.android.library'
 apply plugin: 'com.jfrog.artifactory'
 apply plugin: 'maven-publish'
 
-def packageName = 'com.fitbit.bluetooth.fbgatt'
+if(group == null) {
+    group = 'com.github.Fitbit'
+}
 
-def buildNumber = System.getenv("BUILD_NUMBER") != null ? System.getenv("BUILD_NUMBER").toInteger() : 10000
-def libraryVersionName = sprintf("0.8.0", buildNumber)
+
+def releaseTag = System.getenv("RELEASE_TAG");
+if (releaseTag != null && !releaseTag.isEmpty()) {
+    if (releaseTag.startsWith("v")) {
+        releaseTag = releaseTag.substring(1);
+    }
+    version = releaseTag;
+    project.properties.put("release.version", releaseTag);
+
+    println("Releasing with version " + version);
+}
+
+def isJitPack =  System.getenv('JITPACK') ? System.getenv('JITPACK').toBoolean() : false
+def artifactPath = "$buildDir/outputs/aar"
+def libPrefix = project.name
+
 
 android {
     compileSdkVersion 29
@@ -33,9 +49,8 @@ android {
     defaultConfig {
         minSdkVersion 21
         targetSdkVersion 29
-        versionCode buildNumber
-        versionName libraryVersionName
         multiDexEnabled true
+        versionName version
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -47,11 +62,10 @@ android {
     buildTypes {
         release {
             minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            consumerProguardFile 'proguard-rules.pro'
+            consumerProguardFiles 'proguard-rules.pro'
         }
         debug {
-            testCoverageEnabled true
+            testCoverageEnabled false
         }
         library {
             debuggable true
@@ -90,7 +104,7 @@ dependencies {
     implementation "androidx.multidex:multidex:$MULTIDEX_VERSION"
     implementation "androidx.appcompat:appcompat:$APP_COMPAT_VERSION"
     implementation "com.jakewharton.timber:timber:$TIMBER_VERSION"
-    implementation "com.facebook.stetho:stetho:$STETHO_VERSION"
+    debugImplementation "com.facebook.stetho:stetho:$STETHO_VERSION"
     testImplementation "junit:junit:$JUNIT_VERSION"
     testImplementation "androidx.test:runner:$TEST_RUNNER_VERSION"
     testImplementation "androidx.test:rules:$TEST_RUNNER_VERSION"
@@ -108,41 +122,25 @@ task sourceJar(type: Jar) {
     classifier "sources"
 }
 
+android.libraryVariants.all { variant ->
+    variant.outputs.all {
+        outputFileName = "${variant.name}.aar"
+    }
+}
+
+
 publishing {
     publications {
-        libraryAar(MavenPublication) {
-            groupId packageName
-            version = libraryVersionName
-            artifactId project.getName()
-            artifact sourceJar { classifier 'library' }
-            artifact("$buildDir/outputs/aar/${project.getName()}-library.aar") {classifier 'library' }
-        }
-        releaseAar(MavenPublication) {
-            groupId packageName
-            groupId packageName
-            version = libraryVersionName
-            artifactId project.getName()
-
-            artifact("$buildDir/outputs/aar/${project.getName()}-release.aar") { classifier 'release' }
-            artifact sourceJar { classifier 'release' }
-        }
-        debugAar(MavenPublication) {
-            groupId packageName
-            groupId packageName
-            version = libraryVersionName
-            artifactId project.getName()
-
-            artifact("$buildDir/outputs/aar/${project.getName()}-debug.aar") { classifier 'debug' }
-            artifact sourceJar { classifier 'debug' }
-        }
-        testAar(MavenPublication) {
-            groupId packageName
-            groupId packageName
-            version = libraryVersionName
-            artifactId project.getName()
-
-            artifact("$buildDir/outputs/aar/${project.getName()}-batteryDataTest.aar") { classifier 'test' }
-            artifact sourceJar { classifier 'test' }
+        android.libraryVariants.all { variant ->
+            "${variant.name.capitalize()}Aar"(MavenPublication) {
+                from components.findByName("android${variant.name.capitalize()}")
+                groupId group
+                artifactId 'bitgatt'
+                version "$version-${variant.name}"
+                artifact("$artifactPath/${variant.name}.aar")  {
+                    builtBy tasks.getByName("build")
+                }
+            }
         }
     }
 }

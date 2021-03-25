@@ -99,6 +99,8 @@ class GattServerCallback extends BluetoothGattServerCallback {
             handler.post(() -> listener.onServerConnectionStateChange(device, status, newState));
         }
         GattServerConnection conn = FitbitGatt.getInstance().getServer();
+        GattConnection gattConnection = FitbitGatt.getInstance().getConnection(device);
+
         if (conn == null) {
             Timber.v("[%s] Gatt was null, we could be mocking, if so we can't notify async", getDeviceMacFromDevice(device));
         } else {
@@ -114,8 +116,12 @@ class GattServerCallback extends BluetoothGattServerCallback {
                                 .resultStatus(TransactionResult.TransactionResultStatus.FAILURE).build();
                         handler.post(() -> asyncListener.onServerConnectionStateChanged(device, result, conn));
                     }
+
                     break;
                 case BluetoothProfile.STATE_CONNECTED:
+                    if (gattConnection == null) {
+                        FitbitGatt.getInstance().addConnectedDevice(device);
+                    }
                     for (ServerConnectionEventListener asyncListener : conn.getConnectionEventListeners()) {
                         // since this is async, the result status is irrelevant so it will always be
                         // success because we received this data
@@ -125,6 +131,7 @@ class GattServerCallback extends BluetoothGattServerCallback {
                                 .resultStatus(TransactionResult.TransactionResultStatus.SUCCESS).build();
                         handler.post(() -> asyncListener.onServerConnectionStateChanged(device, result, conn));
                     }
+
                     break;
                 default:
                     Timber.w("[%s] Unknown state %d", getDeviceMacFromDevice(device), newState);
