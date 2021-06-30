@@ -43,7 +43,7 @@ public class GattConnection implements Closeable {
     private FitbitBluetoothDevice device;
     private @Nullable volatile BluetoothGatt gatt;
     private GattState state;
-    private GattStateTransitionValidator guard;
+    private GattStateTransitionValidator<GattClientTransaction> guard;
     private final ConcurrentHashMap<ConnectionEventListener, Boolean> asynchronousEventListeners = new ConcurrentHashMap<>();
     private boolean mockMode;
     private List<BluetoothGattService> mockServices;
@@ -53,7 +53,7 @@ public class GattConnection implements Closeable {
 
     public GattConnection(FitbitBluetoothDevice device, Looper mainLooper) {
         this.device = device;
-        this.guard = new GattStateTransitionValidator();
+        this.guard = new GattStateTransitionValidator<GattClientTransaction>();
         this.mockServices = new ArrayList<>(1);
         this.clientQueue = new TransactionQueueController(this);
         this.state = GattState.DISCONNECTED;
@@ -210,7 +210,7 @@ public class GattConnection implements Closeable {
         return device;
     }
 
-    synchronized GattStateTransitionValidator.GuardState checkTransaction(GattTransaction tx) {
+    synchronized GattStateTransitionValidator.GuardState checkTransaction(GattClientTransaction tx) {
         return guard.checkTransaction(getGattState(), tx);
     }
 
@@ -330,6 +330,24 @@ public class GattConnection implements Closeable {
         } else {
             Timber.v("[%s] Android BluetoothGatt has been used before, using an existing Android BluetoothGatt instance to connect to device", device);
             return ifGattHasBeenInstantiatedConnect(device);
+        }
+    }
+
+    /**
+     * This method is called only for devices that are already connected on Gatt Profile
+     * {@link android.bluetooth.BluetoothManager#getConnectedDevices(int)}
+     * <p>
+     * Will perform a gatt connect on the device, to initialise [BluetoothGatt]
+     * for this connection and set the state to [GattState.CONNECTED]
+     * because no connection change callback will happen
+     */
+    void initGattForConnectedDevice() {
+        Timber.v("[%s] already connected, init BluetoothGatt ", device);
+        if (isConnected()) {
+            return;
+        }
+        if (ifGattHasNeverBeenInstantiatedConnect(device)) {
+            setState(GattState.CONNECTED);
         }
     }
 
@@ -458,6 +476,7 @@ public class GattConnection implements Closeable {
         if (localGatt != null) {
             closeClientIf(localGatt);
             gatt = null;
+            setState(GattState.DISCONNECTED);
         }
         clientQueue.stop();
         asynchronousEventListeners.clear();
@@ -471,6 +490,7 @@ public class GattConnection implements Closeable {
         if (localGatt != null) {
             closeClientIf(localGatt);
             gatt = null;
+            setState(GattState.DISCONNECTED);
         }
     }
 
@@ -494,7 +514,12 @@ public class GattConnection implements Closeable {
      */
 
     public boolean isConnected() {
-        return !getGattState().equals(GattState.DISCONNECTED) && !getGattState().equals(GattState.DISCONNECTING) && !getGattState().equals(GattState.BT_OFF) && !getGattState().equals(GattState.CONNECTING);
+        return !getGattState().equals(GattState.DISCONNECTED)
+                && !getGattState().equals(GattState.DISCONNECTING)
+                && !getGattState().equals(GattState.BT_OFF)
+                && !getGattState().equals(GattState.CONNECTING)
+                && !getGattState().equals(GattState.FAILURE_CONNECTING)
+                && !getGattState().equals(GattState.FAILURE_CONNECTING_WITH_SYSTEM_CRASH);
     }
 
     /**
@@ -514,7 +539,7 @@ public class GattConnection implements Closeable {
      * @param callback    The gatt transaction callback
      */
 
-    public void runTx(GattTransaction transaction, GattTransactionCallback callback) {
+    public void runTx(GattClientTransaction transaction, GattTransactionCallback callback) {
         Timber.v("[%s] Received transaction: %s", getDevice(), transaction.getName());
         resetDisconnectedTTL();
         if (intraTransactionDelay.get() == 0) {
@@ -532,7 +557,7 @@ public class GattConnection implements Closeable {
         }
     }
 
-    private void queueTransaction(GattTransaction transaction, GattTransactionCallback callback) {
+    private void queueTransaction(GattClientTransaction transaction, GattTransactionCallback callback) {
         clientQueue.queueTransaction(() -> transaction.commit(callback));
     }
 
@@ -581,6 +606,7 @@ public class GattConnection implements Closeable {
         if (localGatt != null) {
             closeClientIf(localGatt);
             gatt = null;
+            setState(GattState.DISCONNECTED);
         } else {
             Timber.w("[%s] The gatt was null when trying to release, the logic is busted or you are suffering from an Android bug, look into a strategy.", getDevice());
         }

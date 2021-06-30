@@ -12,8 +12,8 @@ buildscript {
         jcenter()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:3.5.0'
-        classpath "org.jfrog.buildinfo:build-info-extractor-gradle:4.8.1"
+        classpath 'com.android.tools.build:gradle:4.1.2'
+        classpath "org.jfrog.buildinfo:build-info-extractor-gradle:4.17.2"
     }
 }
 
@@ -37,9 +37,7 @@ if (releaseTag != null && !releaseTag.isEmpty()) {
     println("Releasing with version " + version);
 }
 
-def isJitPack =  System.getenv('JITPACK') ? System.getenv('JITPACK').toBoolean() : false
 def artifactPath = "$buildDir/outputs/aar"
-def libPrefix = project.name
 
 
 android {
@@ -63,14 +61,11 @@ android {
         release {
             minifyEnabled false
             consumerProguardFiles 'proguard-rules.pro'
+            buildConfigField("String","VERSION_NAME","\"${defaultConfig.versionName}\"")
         }
         debug {
-            testCoverageEnabled false
-        }
-        library {
-            debuggable true
-            minifyEnabled false
-            testCoverageEnabled false
+            testCoverageEnabled true
+            buildConfigField("String","VERSION_NAME","\"${defaultConfig.versionName}\"")
         }
     }
     testOptions {
@@ -131,15 +126,13 @@ android.libraryVariants.all { variant ->
 
 publishing {
     publications {
-        android.libraryVariants.all { variant ->
-            "${variant.name.capitalize()}Aar"(MavenPublication) {
-                from components.findByName("android${variant.name.capitalize()}")
-                groupId group
-                artifactId 'bitgatt'
-                version "$version-${variant.name}"
-                artifact("$artifactPath/${variant.name}.aar")  {
-                    builtBy tasks.getByName("build")
-                }
+        release (MavenPublication) {
+            from components.findByName("androidRelease")
+            groupId  group
+            artifactId 'bitgatt'
+            version "$version-release"
+            artifact("$artifactPath/release.aar")  {
+                builtBy tasks.getByName("build")
             }
         }
     }

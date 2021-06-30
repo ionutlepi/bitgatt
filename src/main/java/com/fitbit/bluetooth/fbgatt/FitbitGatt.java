@@ -401,6 +401,9 @@ public class FitbitGatt implements PeripheralScanner.TrackerScannerListener, Blu
      * to find devices and rely on the device discovery callbacks or polling the connection cache
      * {@link FitbitGatt#getMatchingConnectionsForDeviceNames(List)} or {@link FitbitGatt#getMatchingConnectionsForServices(List)}
      *
+     * This will copy  report delay, callback type, legacy
+     * and will run using scan mode low latency as scan scan settings
+     *
      * @param context The android context for providing to the scanner
      * @return True if the scan started, false if it did not
      */
@@ -1022,7 +1025,7 @@ public class FitbitGatt implements PeripheralScanner.TrackerScannerListener, Blu
     }
 
     @RestrictTo(RestrictTo.Scope.LIBRARY)
-    synchronized boolean isInitialized() {
+    boolean isInitialized() {
         return isInitialized.get();
     }
 
@@ -1290,6 +1293,26 @@ public class FitbitGatt implements PeripheralScanner.TrackerScannerListener, Blu
             if (manager != null) {
                 BluetoothAdapter adapter = manager.getAdapter();
                 if (adapter != null) {
+                    List<BluetoothDevice> connectedDevices = manager.getConnectedDevices(BluetoothProfile.GATT);
+                    for (BluetoothDevice connectedDevice : connectedDevices) {
+                        FitbitBluetoothDevice fitbitBluetoothDevice = new FitbitBluetoothDevice(connectedDevice);
+                        fitbitBluetoothDevice.origin = FitbitBluetoothDevice.DeviceOrigin.CONNECTED;
+                        GattConnection connection = connectionMap.get(fitbitBluetoothDevice);
+                        if (null == connection) {
+                            Timber.v("Adding connected device named %s, with address %s", connectedDevice.getName(), connectedDevice.getAddress());
+                            if (appContext != null) {
+                                GattConnection conn = new GattConnection(fitbitBluetoothDevice, appContext.getMainLooper());
+                                connectionMap.put(fitbitBluetoothDevice, conn);
+                                conn.initGattForConnectedDevice();
+                                FitbitGatt.getInstance().notifyListenersOfConnectionAdded(conn);
+                            } else {
+                                Timber.w("Tried to add a discovered device, but the cached context was null");
+                            }
+                        } else {
+                            connection.initGattForConnectedDevice();
+                        }
+                    }
+
                     Set<BluetoothDevice> bondedDevices = adapter.getBondedDevices();
                     for (BluetoothDevice bondedDevice : bondedDevices) {
                         FitbitBluetoothDevice fitBluetoothDevice = new FitbitBluetoothDevice(bondedDevice);
@@ -1303,25 +1326,6 @@ public class FitbitGatt implements PeripheralScanner.TrackerScannerListener, Blu
                             Timber.v("Adding bonded device named %s, with address %s", bondedDevice.getName(), bondedDevice.getAddress());
                             connectionMap.put(fitBluetoothDevice, conn);
                             FitbitGatt.getInstance().notifyListenersOfConnectionAdded(conn);
-                        }
-                    }
-                    List<BluetoothDevice> connectedDevices = manager.getConnectedDevices(BluetoothProfile.GATT);
-                    for (BluetoothDevice connectedDevice : connectedDevices) {
-                        FitbitBluetoothDevice fitbitBluetoothDevice = new FitbitBluetoothDevice(connectedDevice);
-                        fitbitBluetoothDevice.origin = FitbitBluetoothDevice.DeviceOrigin.CONNECTED;
-                        GattConnection connection = connectionMap.get(fitbitBluetoothDevice);
-                        if (null == connection) {
-                            Timber.v("Adding connected device named %s, with address %s", connectedDevice.getName(), connectedDevice.getAddress());
-                            if (appContext != null) {
-                                GattConnection conn = new GattConnection(fitbitBluetoothDevice, appContext.getMainLooper());
-                                conn.setState(GattState.CONNECTED);
-                                connectionMap.put(fitbitBluetoothDevice, conn);
-                                FitbitGatt.getInstance().notifyListenersOfConnectionAdded(conn);
-                            } else {
-                                Timber.w("Tried to add a discovered device, but the cached context was null");
-                            }
-                        } else {
-                            connection.setState(GattState.CONNECTED);
                         }
                     }
                 }
